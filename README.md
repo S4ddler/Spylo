@@ -46,8 +46,8 @@ A powerful Open Source Intelligence (OSINT) framework for domain and username re
 
 ```bash
 # Clone repository
-git clone https://github.com/S4ddler/floppa.git
-cd floppa
+git clone https://github.com/S4ddler/Spylo.git
+cd Spylo
 
 # Create virtual environment
 python3 -m venv .venv
@@ -145,7 +145,7 @@ spylo> scan site dns
 ## Project Structure
 
 ```
-floppa/
+Spylo/
 ├── main.py                 # Main program
 ├── requirements.txt        # Dependencies
 ├── README.md              # This file
@@ -204,8 +204,8 @@ MIT License - see LICENSE file
 
 ## Support
 
-- Issues: https://github.com/S4ddler/floppa/issues
-- Discussions: https://github.com/S4ddler/floppa/discussions
+- Issues: https://github.com/S4ddler/Spylo/issues
+- Discussions: https://github.com/S4ddler/Spylo/discussions
 - Twitter: @S4ddler
 
 ## Version
