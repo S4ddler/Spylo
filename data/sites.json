@@ -150,5 +150,229 @@
   "About.me": {
     "url": "https://about.me/{account}",
     "errorType": "status_code"
+  },
+  "Threads": {
+    "url": "https://www.threads.net/@{account}",
+    "errorType": "status_code"
+  },
+  "WhatsApp": {
+    "url": "https://www.whatsapp.com/{account}",
+    "errorType": "status_code"
+  },
+  "QQ": {
+    "url": "https://im.qq.com/{account}",
+    "errorType": "status_code"
+  },
+  "Qzone": {
+    "url": "https://qzone.qq.com/{account}",
+    "errorType": "status_code"
+  },
+  "Weibo": {
+    "url": "https://weibo.com/{account}",
+    "errorType": "status_code"
+  },
+  "Douyin": {
+    "url": "https://www.douyin.com/user/{account}",
+    "errorType": "status_code"
+  },
+  "Kuaishou": {
+    "url": "https://www.kuaishou.com/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Badoo": {
+    "url": "https://badoo.com/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Odnoklassniki": {
+    "url": "https://ok.ru/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Line": {
+    "url": "https://line.me/ti/p/~{account}",
+    "errorType": "status_code"
+  },
+  "Zalo": {
+    "url": "https://zalo.me/pc/{account}",
+    "errorType": "status_code"
+  },
+  "Tumblr": {
+    "url": "https://{account}.tumblr.com",
+    "errorType": "status_code"
+  },
+  "Truth Social": {
+    "url": "https://truthsocial.com/@{account}",
+    "errorType": "status_code"
+  },
+  "Gab": {
+    "url": "https://gab.com/{account}",
+    "errorType": "status_code"
+  },
+  "Mastodon": {
+    "url": "https://mastodon.social/@{account}",
+    "errorType": "status_code"
+  },
+  "Bluesky": {
+    "url": "https://bsky.app/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Clubhouse": {
+    "url": "https://www.clubhouse.com/@{account}",
+    "errorType": "status_code"
+  },
+  "IMO": {
+    "url": "https://imo.im/{account}",
+    "errorType": "status_code"
+  },
+  "Tagged": {
+    "url": "https://badoo.com/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Meetup": {
+    "url": "https://www.meetup.com/members/{account}",
+    "errorType": "status_code"
+  },
+  "Couchsurfing": {
+    "url": "https://www.couchsurfing.com/people/{account}",
+    "errorType": "status_code"
+  },
+  "Goodreads": {
+    "url": "https://www.goodreads.com/{account}",
+    "errorType": "status_code"
+  },
+  "ReverbNation": {
+    "url": "https://www.reverbnation.com/{account}",
+    "errorType": "status_code"
+  },
+  "Wattpad": {
+    "url": "https://www.wattpad.com/user/{account}",
+    "errorType": "status_code"
+  },
+  "Letterboxd": {
+    "url": "https://letterboxd.com/{account}",
+    "errorType": "status_code"
+  },
+  "Cash App": {
+    "url": "https://cash.app/${account}",
+    "errorType": "status_code"
+  },
+  "OnlyFans": {
+    "url": "https://onlyfans.com/{account}",
+    "errorType": "status_code"
+  },
+  "FaceBook Messenger": {
+    "url": "https://m.me/{account}",
+    "errorType": "status_code"
+  },
+  "WeChat": {
+    "url": "https://wechat.com/{account}",
+    "errorType": "status_code"
+  },
+  "MySpace": {
+    "url": "https://myspace.com/{account}",
+    "errorType": "status_code"
+  },
+  "Foursquare": {
+    "url": "https://foursquare.com/user/{account}",
+    "errorType": "status_code"
+  },
+  "Quora": {
+    "url": "https://www.quora.com/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Mix": {
+    "url": "https://mix.com/{account}",
+    "errorType": "status_code"
+  },
+  "Periscope": {
+    "url": "https://www.pscp.tv/{account}",
+    "errorType": "status_code"
+  },
+  "Ello": {
+    "url": "https://ello.co/{account}",
+    "errorType": "status_code"
+  },
+  "Vero": {
+    "url": "https://vero.co/{account}",
+    "errorType": "status_code"
+  },
+  "Minds": {
+    "url": "https://www.minds.com/{account}",
+    "errorType": "status_code"
+  },
+  "Parler": {
+    "url": "https://parler.com/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Rumble": {
+    "url": "https://rumble.com/user/{account}",
+    "errorType": "status_code"
+  },
+  "BitChute": {
+    "url": "https://www.bitchute.com/profile/{account}",
+    "errorType": "status_code"
+  },
+  "Dailymotion": {
+    "url": "https://www.dailymotion.com/{account}",
+    "errorType": "status_code"
+  },
+  "Imgur": {
+    "url": "https://imgur.com/user/{account}",
+    "errorType": "status_code"
+  },
+  "DeviantArt": {
+    "url": "https://www.deviantart.com/{account}",
+    "errorType": "status_code"
+  },
+  "ArtStation": {
+    "url": "https://www.artstation.com/{account}",
+    "errorType": "status_code"
+  },
+  "Behance": {
+    "url": "https://www.behance.net/{account}",
+    "errorType": "status_code"
+  },
+  "500px": {
+    "url": "https://500px.com/p/{account}",
+    "errorType": "status_code"
+  },
+  "VSCO": {
+    "url": "https://vsco.co/{account}",
+    "errorType": "status_code"
+  },
+  "EyeEm": {
+    "url": "https://www.eyeem.com/u/{account}",
+    "errorType": "status_code"
+  },
+  "Fotolog": {
+    "url": "https://fotolog.com/{account}",
+    "errorType": "status_code"
+  },
+  "Last.fm": {
+    "url": "https://www.last.fm/user/{account}",
+    "errorType": "status_code"
+  },
+  "Bandcamp": {
+    "url": "https://bandcamp.com/{account}",
+    "errorType": "status_code"
+  },
+  "Mixcloud": {
+    "url": "https://www.mixcloud.com/{account}",
+    "errorType": "status_code"
+  },
+  "Audius": {
+    "url": "https://audius.co/{account}",
+    "errorType": "status_code"
+  },
+  "Patreon": {
+    "url": "https://www.patreon.com/{account}",
+    "errorType": "status_code"
+  },
+  "Substack": {
+    "url": "https://substack.com/@{account}",
+    "errorType": "status_code"
+  },
+  "Ghost": {
+    "url": "https://ghost.org/@{account}",
+    "errorType": "status_code"
   }
 }

@@ -12,6 +12,13 @@ import whois
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, BarColumn
+from rich.panel import Panel
+from rich.box import ROUNDED, SQUARE
+
+# Modern minimal color scheme
+PRIMARY_BLUE = "#0066cc"  # Deeper blue for main elements
+SECONDARY_BLUE = "#4d94ff"  # Lighter blue for secondary elements
+WHITE = "#ffffff"  # Pure white
 
 from core.utils import which, run_cmd, grab_banner, fetch_tls_cert, extract_cert_summary
 
@@ -31,173 +38,440 @@ class DomainScanner:
     wordlist: Optional[str] = None
     dns_server: Optional[str] = None
 
-    def scan(self, domain: str) -> dict:
-        result: Dict = {"dns": {"records": {}}, "whois": {}, "subdomains": []}
-
+    def scan_whois(self, domain: str) -> dict:
+        """Perform WHOIS lookup for a domain"""
+        result = {"whois": {}}
+        
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
             TimeElapsedColumn(),
+            console=console,
+            transient=True
         ) as progress:
-            scan_task = progress.add_task("🔍 Starting domain reconnaissance...", total=8)
+            task = progress.add_task(f"[{PRIMARY_BLUE}]Fetching WHOIS information[/{PRIMARY_BLUE}]")
             
             try:
-                progress.update(scan_task, description="📑 Fetching WHOIS information...")
                 w = whois.whois(domain)
+                
+                # Handle dates - some might be lists, take first non-None value
+                def get_date(date_field):
+                    if isinstance(date_field, (list, tuple)):
+                        return next((d for d in date_field if d is not None), None)
+                    return date_field
+                
+                # Handle statuses - ensure we have a list and clean it up
+                def clean_status(status):
+                    if not status:
+                        return None
+                    if isinstance(status, str):
+                        return [status]
+                    if isinstance(status, (list, tuple)):
+                        return [s for s in status if s]
+                    return None
+                
                 whois_info = {
                     "domain_name": self._safe(w.domain_name),
                     "registrar": self._safe(w.registrar),
-                    "creation_date": self._safe(w.creation_date),
-                    "expiration_date": self._safe(w.expiration_date),
-                    "updated_date": self._safe(w.updated_date),
-                    "name_servers": list(sorted(set([str(x) for x in (w.name_servers or [])]))),
-                    "status": self._safe(w.status),
+                    "creation_date": self._safe(get_date(w.creation_date)),
+                    "expiration_date": self._safe(get_date(w.expiration_date)),
+                    "updated_date": self._safe(get_date(w.updated_date)),
+                    "name_servers": list(sorted(set([str(x).lower() for x in (w.name_servers or []) if x]))),
+                    "status": clean_status(w.status),
                 }
                 result["whois"] = whois_info
                 
-                # Display immediate results
-                console.print("\n[bold green]WHOIS Information:[/bold green]")
-                whois_table = Table(show_header=True, header_style="bold blue")
-                whois_table.add_column("Field", style="bold cyan")
-                whois_table.add_column("Value")
-                for key, value in whois_info.items():
+                # Build and display modern table
+                table = Table(box=SQUARE)
+                table.add_column(f"[{WHITE}]Field[/{WHITE}]")
+                table.add_column(f"[{WHITE}]Value[/{WHITE}]")
+                
+                # Display fields in a specific order with nice formatting
+                field_order = [
+                    ("domain_name", "Domain Name"),
+                    ("registrar", "Registrar"),
+                    ("creation_date", "Created"),
+                    ("expiration_date", "Expires"),
+                    ("updated_date", "Updated"),
+                    ("name_servers", "Nameservers"),
+                    ("status", "Status")
+                ]
+                
+                for key, display_name in field_order:
+                    value = whois_info.get(key)
                     if value:
                         if isinstance(value, list):
-                            whois_table.add_row(key.replace('_', ' ').title(), "\n".join(value))
+                            # Format lists vertically with bullet points
+                            formatted_value = "\n• " + "\n• ".join(value)
                         else:
-                            whois_table.add_row(key.replace('_', ' ').title(), str(value))
-                console.print(whois_table)
+                            formatted_value = str(value)
+                        table.add_row(
+                            f"[{PRIMARY_BLUE}]{display_name}[/{PRIMARY_BLUE}]",
+                            f"[{SECONDARY_BLUE}]{formatted_value}[/{SECONDARY_BLUE}]"
+                        )
+                
+                if table.row_count > 0:
+                    console.print()
+                    console.print(Panel(table, title=f"[{WHITE}]WHOIS Information[/{WHITE}]", box=SQUARE))
+                else:
+                    console.print()
+                    console.print(Panel(
+                        f"[{SECONDARY_BLUE}]No WHOIS information found[/{SECONDARY_BLUE}]",
+                        title=f"[{WHITE}]WHOIS Information[/{WHITE}]",
+                        box=SQUARE
+                    ))
                 
             except Exception as e:
                 result["whois_error"] = str(e)
-                console.print("\n[bold red]❌ Error fetching WHOIS information[/bold red]")
-            progress.update(scan_task, advance=1)
-
-            progress.update(scan_task, description="🌐 Gathering DNS records...")
-            resolver = dns.resolver.Resolver()
-            if self.dns_server:
-                resolver.nameservers = [self.dns_server]
+                console.print(Panel(
+                    f"[{SECONDARY_BLUE}]Error: Could not fetch WHOIS information ({str(e)})[/{SECONDARY_BLUE}]",
+                    title=f"[{WHITE}]Error[/{WHITE}]",
+                    box=SQUARE
+                ))
             
-            console.print("\n[bold]═══════════════ DNS Records ═══════════════[/bold]")
-            dns_table = Table(show_header=True, header_style="bold")
-            dns_table.add_column("Record Type", style="green")
-            dns_table.add_column("Values", style="white")
+            progress.update(task, completed=100)
+        
+        return result
+
+    def scan_dns(self, domain: str) -> dict:
+        """Perform DNS enumeration for a domain"""
+        result = {"dns": {"records": {}}}
+        
+        resolver = dns.resolver.Resolver()
+        if self.dns_server:
+            resolver.nameservers = [self.dns_server]
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True
+        ) as progress:
+            task = progress.add_task(
+                f"[{PRIMARY_BLUE}]Gathering DNS records[/{PRIMARY_BLUE}]",
+                total=len(SUPPORTED_RRTYPES)
+            )
+            
+            dns_table = Table(box=SQUARE)
+            dns_table.add_column(f"[{PRIMARY_BLUE}]Record[/{PRIMARY_BLUE}]")
+            dns_table.add_column(f"[{PRIMARY_BLUE}]Value[/{PRIMARY_BLUE}]")
             
             for rr in SUPPORTED_RRTYPES:
+                progress.update(
+                    task,
+                    advance=1,
+                    description=f"[{PRIMARY_BLUE}]Checking {rr} records[/{PRIMARY_BLUE}]"
+                )
+                
                 recs = self._dig(domain, rr)
                 if not recs:
                     recs = self._dns_query(resolver, domain, rr)
                 if recs:
                     result["dns"]["records"][rr] = recs
-                    dns_table.add_row(rr, "\n".join(recs))
-            
-            console.print(dns_table)
-            progress.update(scan_task, advance=1)
+                    dns_table.add_row(
+                        f"[{SECONDARY_BLUE}]{rr}[/{SECONDARY_BLUE}]",
+                        f"[{WHITE}]{chr(10).join(recs)}[/{WHITE}]"
+                    )
+        
+        if dns_table.row_count > 0:
+            console.print()
+            console.print(Panel(
+                dns_table,
+                title=f"[{WHITE}]DNS Records[/{WHITE}]",
+                box=SQUARE
+            ))
+        
+        return result
 
-            progress.update(scan_task, description="🔄 Performing reverse DNS lookups...")
-            ips = set(result["dns"]["records"].get("A", []) + result["dns"]["records"].get("AAAA", []))
-            rev = {}
-            for ip in ips:
-                try:
-                    rev[ip] = socket.gethostbyaddr(ip)[0]
-                except Exception:
-                    rev[ip] = None
-            result["dns"]["reverse"] = rev
-            progress.update(scan_task, advance=1)
-
-            dnssec_present = bool(result["dns"]["records"].get("DS") or result["dns"]["records"].get("DNSKEY"))
-            result["dns"]["dnssec_present"] = dnssec_present
-
-            if not self.no_axfr:
-                progress.update(scan_task, description="🔍 Checking zone transfer...")
-                axfr_findings = []
-                for ns in result["dns"]["records"].get("NS", []) or []:
-                    host = ns.split()[0].strip(".") if " " in ns else ns.strip(".")
-                    ok, out = self._try_axfr(host, domain)
-                    if ok:
-                        axfr_findings.append({"ns": host, "lines": out.splitlines()[:200]})
-                result["dns"]["axfr"] = axfr_findings
-            progress.update(scan_task, advance=1)
-
-            progress.update(scan_task, description="🌍 Enumerating subdomains...")
-            subdomains = self._enum_crtsh(domain)
-            result["subdomains"] = sorted(set(subdomains))
-
-            if self.wordlist:
-                progress.update(scan_task, description="🔍 Bruteforcing subdomains...")
-                subs = self._brute_subdomains(domain, self.wordlist, resolver)
-                result["subdomains"] = sorted(set(result["subdomains"] + subs))
-            progress.update(scan_task, advance=1)
-
-            progress.update(scan_task, description="📍 Looking up GeoIP information...")
-            geo = {}
-            for ip in ips:
-                g = self._geoip(ip)
-                if g:
-                    geo[ip] = g
-            result["geoip"] = geo
-            progress.update(scan_task, advance=1)
-
-            if not self.no_scan_ports and ips:
-                progress.update(scan_task, description="🔌 Scanning ports...")
-                service_map = {}
-                ports = [int(p) for p in self.top_ports.split(",") if p.strip().isdigit()]
-                
-                for ip in ips:
-                    console.print(f"\n[bold]═══════════════ Port Scan for IP: {ip} ═══════════════[/bold]")
-                    port_table = Table(show_header=True, header_style="bold")
-                    port_table.add_column("Port", style="green")
-                    port_table.add_column("Service", style="white")
-                    port_table.add_column("Version", style="white")
-                    port_table.add_column("Banner", style="white")
-                    
-                    services = self._scan_ports(ip, ports)
-                    service_map[ip] = services
-                    
-                    for port, info in services.items():
-                        version = info.get('version', '')
-                        banner = info.get('banner', '')
-                        if banner and len(banner) > 50:
-                            banner = banner[:50] + '...'
-                        port_table.add_row(
-                            str(port),
-                            info.get('service', 'unknown'),
-                            version or '',
-                            banner or ''
-                        )
-                    
-                    console.print(port_table)
-                result["services"] = service_map
-            progress.update(scan_task, advance=1)
-
-            progress.update(scan_task, description="🔒 Checking TLS and HTTP...")
+    def scan_ports(self, domain: str) -> dict:
+        """Perform port scanning for a domain"""
+        result = {"ports": {}}
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True
+        ) as progress:
             try:
-                cert = fetch_tls_cert(domain, 443, timeout=8)
-                result["tls"] = extract_cert_summary(cert)
-            except Exception:
-                result["tls"] = {}
+                # First task: Resolving IPs
+                ips = set()
+                resolver = dns.resolver.Resolver()
+                resolve_task = progress.add_task(
+                    f"[{PRIMARY_BLUE}]Resolving IP addresses[/{PRIMARY_BLUE}]"
+                )
 
-            http_fp = self._http_fingerprint(domain)
-            result["http"] = http_fp
-            progress.update(scan_task, advance=1)
+                if self.dns_server:
+                    resolver.nameservers = [self.dns_server]
+                
+                # First resolve IPs
+                for rr in ["A", "AAAA"]:
+                    try:
+                        answers = resolver.resolve(domain, rr)
+                        ips.update(str(rdata) for rdata in answers)
+                    except Exception:
+                        pass
+                
+                progress.update(resolve_task, completed=100)
+                
+                if not ips:
+                    console.print(Panel(
+                        f"[{SECONDARY_BLUE}]Could not resolve domain to IP address[/{SECONDARY_BLUE}]",
+                        title=f"[{WHITE}]Error[/{WHITE}]",
+                        box=SQUARE
+                    ))
+                    return result
+                
+                # Start port scanning
+                total_ports = len(ips) * len(self.top_ports.split(","))
+                scan_task = progress.add_task(
+                    f"[{PRIMARY_BLUE}]Scanning ports[/{PRIMARY_BLUE}]",
+                    total=total_ports
+                )
+                
+                scan_table = Table(box=SQUARE)
+                scan_table.add_column(f"[{PRIMARY_BLUE}]IP[/{PRIMARY_BLUE}]")
+                scan_table.add_column(f"[{PRIMARY_BLUE}]Port[/{PRIMARY_BLUE}]")
+                scan_table.add_column(f"[{PRIMARY_BLUE}]Service[/{PRIMARY_BLUE}]")
+                scan_table.add_column(f"[{PRIMARY_BLUE}]Details[/{PRIMARY_BLUE}]")
+                
+                found_open_ports = False
+                for ip in ips:
+                    result["ports"][ip] = {}
+                    for port in map(int, self.top_ports.split(",")):
+                        progress.update(
+                            scan_task,
+                            advance=1,
+                            description=f"[{PRIMARY_BLUE}]Checking {ip}:{port}[/{PRIMARY_BLUE}]"
+                        )
+                        
+                        try:
+                            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            sock.settimeout(self.timeout)
+                            if sock.connect_ex((ip, port)) == 0:
+                                found_open_ports = True
+                                banner = grab_banner(ip, port, self.timeout)
+                                cert = fetch_tls_cert(ip, port) if port in [443, 8443] else None
+                                cert_info = extract_cert_summary(cert) if cert else None
+                                service_name = banner if banner else "unknown"
+                                
+                                result["ports"][ip][port] = {
+                                    "state": "open",
+                                    "service": service_name
+                                }
+                            
+                                details = []
+                                if banner:
+                                    details.append(banner)
+                                if cert_info:
+                                    details.append(cert_info)
+                                
+                                scan_table.add_row(
+                                    f"[{SECONDARY_BLUE}]{ip}[/{SECONDARY_BLUE}]",
+                                    f"[{WHITE}]{port}[/{WHITE}]",
+                                    f"[{SECONDARY_BLUE}]{service_name}[/{SECONDARY_BLUE}]",
+                                    f"[{WHITE}]{' '.join(details)}[/{WHITE}]"
+                                )
+                            sock.close()
+                        except Exception:
+                            continue
+                
+                console.print()
+                if found_open_ports:
+                    console.print(Panel(
+                        scan_table,
+                        title=f"[{WHITE}]Port Scan Results[/{WHITE}]",
+                        box=SQUARE
+                    ))
+                else:
+                    console.print(Panel(
+                        f"[{SECONDARY_BLUE}]No open ports found[/{SECONDARY_BLUE}]",
+                        title=f"[{WHITE}]Port Scan Results[/{WHITE}]",
+                        box=SQUARE
+                    ))
+            except Exception as e:
+                console.print(Panel(
+                    f"[{SECONDARY_BLUE}]Error during port scan: {str(e)}[/{SECONDARY_BLUE}]",
+                    title=f"[{WHITE}]Error[/{WHITE}]",
+                    box=SQUARE
+                ))
+        
+        return result
 
-            result["summary"] = {
-                "a_records": len(result["dns"]["records"].get("A", []) or []),
-                "subdomains": len(result["subdomains"]),
-                "dnssec": dnssec_present,
-                "open_services": sum(len(v) for v in result.get("services", {}).values()),
-                "whois_registrar": (result.get("whois", {}) or {}).get("registrar"),
-            }
-            
-            progress.update(scan_task, description="✅ Scan completed!")
+    def scan(self, domain: str) -> dict:
+        """Perform full scan including WHOIS, DNS, and ports"""
+        result = {}
+        
+        # Call individual scan methods with modern styling
+        whois_result = self.scan_whois(domain)
+        result.update(whois_result)
+        
+        dns_result = self.scan_dns(domain)
+        result.update(dns_result)
+        
+        if not self.no_scan_ports:
+            ports_result = self.scan_ports(domain)
+            result.update(ports_result)
+        
+        # Gather additional information and update result
+        # Add summary information
+        result["summary"] = {
+            "a_records": len(result.get("dns", {}).get("records", {}).get("A", []) or []),
+            "subdomains": len(result.get("subdomains", [])),
+            "dnssec": result.get("dns", {}).get("dnssec_present", False),
+            "open_services": sum(len(p) for p in result.get("ports", {}).values()),
+            "whois_registrar": (result.get("whois", {}) or {}).get("registrar"),
+        }
+        
+        # Display final summary
+        console.print()
+        console.print(Panel(
+            "\n".join([
+                f"[{SECONDARY_BLUE}]A Records:[/{SECONDARY_BLUE}] [{WHITE}]{result['summary']['a_records']}[/{WHITE}]",
+                f"[{SECONDARY_BLUE}]Subdomains:[/{SECONDARY_BLUE}] [{WHITE}]{result['summary']['subdomains']}[/{WHITE}]",
+                f"[{SECONDARY_BLUE}]DNSSEC:[/{SECONDARY_BLUE}] [{WHITE}]{'Enabled' if result['summary']['dnssec'] else 'Disabled'}[/{WHITE}]",
+                f"[{SECONDARY_BLUE}]Open Services:[/{SECONDARY_BLUE}] [{WHITE}]{result['summary']['open_services']}[/{WHITE}]",
+                f"[{SECONDARY_BLUE}]Registrar:[/{SECONDARY_BLUE}] [{WHITE}]{result['summary']['whois_registrar'] or 'Unknown'}[/{WHITE}]"
+            ]),
+            title=f"[{WHITE}]Domain Scan Summary[/{WHITE}]",
+            box=SQUARE
+        ))
+        # First gather IPs from A and AAAA records
+        ips = set()
+        for rec in ["A", "AAAA"]:
+            ips.update(result.get("dns", {}).get("records", {}).get(rec, []))
+
+            # Start with reverse DNS lookups
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True
+            ) as progress:
+                task = progress.add_task(f"[{PRIMARY_BLUE}]Performing reverse DNS lookups[/{PRIMARY_BLUE}]")
+                rev = {}
+                for ip in ips:
+                    try:
+                        rev[ip] = socket.gethostbyaddr(ip)[0]
+                    except Exception:
+                        rev[ip] = None
+                result["dns"] = result.get("dns", {})
+                result["dns"]["reverse"] = rev
+                progress.update(task, completed=100)
+
+            # Check DNSSEC
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True
+            ) as progress:
+                task = progress.add_task(f"[{PRIMARY_BLUE}]Checking DNSSEC[/{PRIMARY_BLUE}]")
+                dnssec_present = bool(result.get("dns", {}).get("records", {}).get("DS") or 
+                                    result.get("dns", {}).get("records", {}).get("DNSKEY"))
+                result["dns"]["dnssec_present"] = dnssec_present
+                progress.update(task, completed=100)
+
+            # Zone transfers if enabled
+            if not self.no_axfr:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    TimeElapsedColumn(),
+                    console=console,
+                    transient=True
+                ) as progress:
+                    task = progress.add_task(f"[{PRIMARY_BLUE}]Checking zone transfers[/{PRIMARY_BLUE}]")
+                    axfr_findings = []
+                    nameservers = result.get("dns", {}).get("records", {}).get("NS", []) or []
+                    
+                    for i, ns in enumerate(nameservers):
+                        progress.update(task, completed=(i/len(nameservers))*100)
+                        host = ns.split()[0].strip(".") if " " in ns else ns.strip(".")
+                        ok, out = self._try_axfr(host, domain)
+                        if ok:
+                            axfr_findings.append({"ns": host, "lines": out.splitlines()[:200]})
+                    
+                    result["dns"]["axfr"] = axfr_findings
+                    progress.update(task, completed=100)
+
+            # Enumerate subdomains
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True
+            ) as progress:
+                task = progress.add_task(f"[{PRIMARY_BLUE}]Enumerating subdomains[/{PRIMARY_BLUE}]")
+                subdomains = self._enum_crtsh(domain)
+                
+                if self.wordlist:
+                    progress.update(task, description=f"[{PRIMARY_BLUE}]Bruteforcing subdomains[/{PRIMARY_BLUE}]")
+                    subs = self._brute_subdomains(domain, self.wordlist, dns.resolver.Resolver())
+                    subdomains.extend(subs)
+                
+                result["subdomains"] = sorted(set(subdomains))
+                progress.update(task, completed=100)
+
+            # GeoIP lookup
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True
+            ) as progress:
+                task = progress.add_task(f"[{PRIMARY_BLUE}]Looking up GeoIP information[/{PRIMARY_BLUE}]")
+                
+                geo = {}
+                for i, ip in enumerate(ips):
+                    progress.update(task, completed=(i/len(ips))*100)
+                    g = self._geoip(ip)
+                    if g:
+                        geo[ip] = g
+                
+                result["geoip"] = geo
+                progress.update(task, completed=100)
+
+            # HTTP and TLS checks
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True
+            ) as progress:
+                task = progress.add_task(f"[{PRIMARY_BLUE}]Checking HTTP and TLS[/{PRIMARY_BLUE}]")
+                
+                try:
+                    cert = fetch_tls_cert(domain, 443, timeout=8)
+                    result["tls"] = extract_cert_summary(cert)
+                except Exception:
+                    result["tls"] = {}
+                
+                progress.update(task, description=f"[{PRIMARY_BLUE}]Fingerprinting HTTP servers[/{PRIMARY_BLUE}]")
+                http_fp = self._http_fingerprint(domain)
+                result["http"] = http_fp
+                
+                progress.update(task, completed=100)
 
         return result
 
     def _safe(self, v):
+        if v is None:
+            return None
         if isinstance(v, (list, tuple, set)):
-            return [self._safe(x) for x in v]
-        return str(v) if v is not None else None
+            # Filter out None values and convert remaining to strings
+            return [str(x) for x in v if x is not None]
+        # Handle date objects by getting just the date part
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        return str(v)
 
     def _dig(self, domain: str, rr: str) -> List[str]:
         if not which("dig"):
@@ -405,14 +679,14 @@ class DomainScanner:
         # MySQL Version
         if port == 3306 and banner:
             try:
-                return f"MySQL {banner.split('\\x00')[1].split('-')[1].split('\\n')[0]}"
+                return f"MySQL {banner.split(chr(0))[1].split('-')[1].split(chr(10))[0]}"
             except:
                 pass
                 
         # PostgreSQL Version
         if port == 5432 and banner:
             try:
-                return f"PostgreSQL {banner.split('\\x00')[1]}"
+                return f"PostgreSQL {banner.split(chr(0))[1]}"
             except:
                 pass
                 
@@ -426,24 +700,72 @@ class DomainScanner:
 
     def _http_fingerprint(self, domain: str) -> dict:
         out = {"http": {}, "https": {}}
-        try:
-            r = requests.get(f"http://{domain}", timeout=6, allow_redirects=True)
-            out["http"] = {
-                "status": r.status_code,
-                "final_url": r.url,
-                "server": r.headers.get("Server"),
-                "powered_by": r.headers.get("X-Powered-By"),
-            }
-        except Exception:
-            pass
-        try:
-            r = requests.get(f"https://{domain}", timeout=8, allow_redirects=True)
-            out["https"] = {
-                "status": r.status_code,
-                "final_url": r.url,
-                "server": r.headers.get("Server"),
-                "powered_by": r.headers.get("X-Powered-By"),
-            }
-        except Exception:
-            pass
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True
+        ) as progress:
+            task = progress.add_task(f"[{PRIMARY_BLUE}]Checking HTTP[/{PRIMARY_BLUE}]", total=2)
+            
+            try:
+                progress.update(task, description=f"[{PRIMARY_BLUE}]Testing HTTP connection[/{PRIMARY_BLUE}]")
+                r = requests.get(f"http://{domain}", timeout=6, allow_redirects=True)
+                out["http"] = {
+                    "status": r.status_code,
+                    "final_url": r.url,
+                    "server": r.headers.get("Server"),
+                    "powered_by": r.headers.get("X-Powered-By"),
+                }
+                
+                # Display HTTP info
+                http_table = Table(box=SQUARE)
+                http_table.add_column(f"[{PRIMARY_BLUE}]Field[/{PRIMARY_BLUE}]")
+                http_table.add_column(f"[{PRIMARY_BLUE}]Value[/{PRIMARY_BLUE}]")
+                
+                http_table.add_row(f"[{SECONDARY_BLUE}]Status[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.status_code}[/{WHITE}]")
+                http_table.add_row(f"[{SECONDARY_BLUE}]URL[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.url}[/{WHITE}]")
+                if r.headers.get("Server"):
+                    http_table.add_row(f"[{SECONDARY_BLUE}]Server[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.headers['Server']}[/{WHITE}]")
+                if r.headers.get("X-Powered-By"):
+                    http_table.add_row(f"[{SECONDARY_BLUE}]Powered By[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.headers['X-Powered-By']}[/{WHITE}]")
+                
+                console.print()
+                console.print(Panel(http_table, title=f"[{WHITE}]HTTP Server Information[/{WHITE}]", box=SQUARE))
+                
+            except Exception:
+                pass
+            
+            progress.update(task, advance=1, description=f"[{PRIMARY_BLUE}]Testing HTTPS connection[/{PRIMARY_BLUE}]")
+            
+            try:
+                r = requests.get(f"https://{domain}", timeout=8, allow_redirects=True)
+                out["https"] = {
+                    "status": r.status_code,
+                    "final_url": r.url,
+                    "server": r.headers.get("Server"),
+                    "powered_by": r.headers.get("X-Powered-By"),
+                }
+                
+                # Display HTTPS info
+                https_table = Table(box=SQUARE)
+                https_table.add_column(f"[{PRIMARY_BLUE}]Field[/{PRIMARY_BLUE}]")
+                https_table.add_column(f"[{PRIMARY_BLUE}]Value[/{PRIMARY_BLUE}]")
+                
+                https_table.add_row(f"[{SECONDARY_BLUE}]Status[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.status_code}[/{WHITE}]")
+                https_table.add_row(f"[{SECONDARY_BLUE}]URL[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.url}[/{WHITE}]")
+                if r.headers.get("Server"):
+                    https_table.add_row(f"[{SECONDARY_BLUE}]Server[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.headers['Server']}[/{WHITE}]")
+                if r.headers.get("X-Powered-By"):
+                    https_table.add_row(f"[{SECONDARY_BLUE}]Powered By[/{SECONDARY_BLUE}]", f"[{WHITE}]{r.headers['X-Powered-By']}[/{WHITE}]")
+                
+                console.print()
+                console.print(Panel(https_table, title=f"[{WHITE}]HTTPS Server Information[/{WHITE}]", box=SQUARE))
+                
+            except Exception:
+                pass
+            
+            progress.update(task, completed=100)
+        
         return out

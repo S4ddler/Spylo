@@ -2,12 +2,20 @@ import asyncio
 import json
 import random
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import aiohttp
 from aiohttp import ClientResponse
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, TextColumn
+from rich.panel import Panel
+from rich.table import Table
+from rich.box import ROUNDED, SQUARE
+
+# Modern minimal color scheme
+PRIMARY_BLUE = "#0066cc"  # Deeper blue for main elements
+SECONDARY_BLUE = "#4d94ff"  # Lighter blue for secondary elements
+WHITE = "#ffffff"  # Pure white
 
 console = Console()
 
@@ -22,7 +30,7 @@ DEFAULT_HEADERS = [
 
 
 class UsernameScanner:
-    def __init__(self, timeout: int = 15, concurrency: int = 50, retries: int = 2, proxy: str | None = None):
+    def __init__(self, timeout: int = 15, concurrency: int = 50, retries: int = 2, proxy: Optional[str] = None):
         self.timeout = timeout
         self.concurrency = concurrency
         self.retries = retries
@@ -31,8 +39,48 @@ class UsernameScanner:
             self.sites: Dict[str, dict] = json.load(f)
 
     def scan(self, username: str) -> dict:
-        results = asyncio.run(self._scan_async(username))
-        return {"accounts": results, "summary": {"matches": len(results)}}
+        try:
+            # Show scan initialization
+            console.print(f"[{PRIMARY_BLUE}]Starting scan for[/{PRIMARY_BLUE}] [{SECONDARY_BLUE}]{username}[/{SECONDARY_BLUE}]")
+            console.print()
+            
+            results = asyncio.run(self._scan_async(username))
+            found_accounts = [r for r in results if r is not None and not r.get("error")]
+            failed_sites = [r["site"] for r in results if r is not None and r.get("error")]
+            
+            summary = {
+                "username": username,
+                "total_checked": len(self.sites),
+                "found": len(found_accounts),
+                "failed": len(failed_sites),
+                "success_rate": f"{(len(found_accounts) / len(self.sites)) * 100:.1f}%"
+            }
+            
+            if found_accounts:
+                console.print()
+                console.print(f"[{PRIMARY_BLUE}]Found {len(found_accounts)} accounts:[/{PRIMARY_BLUE}]")
+                for account in found_accounts:
+                    console.print(f"[{SECONDARY_BLUE}]\u2022 {account['site']}:[/{SECONDARY_BLUE}] {account['url']}")
+            
+            console.print()
+            console.print(f"[{PRIMARY_BLUE}]Scan Summary:[/{PRIMARY_BLUE}]")
+            console.print(f"[{SECONDARY_BLUE}]\u2022 Total Sites:[/{SECONDARY_BLUE}] {summary['total_checked']}")
+            console.print(f"[{SECONDARY_BLUE}]\u2022 Found:[/{SECONDARY_BLUE}] {summary['found']}")
+            console.print(f"[{SECONDARY_BLUE}]\u2022 Success Rate:[/{SECONDARY_BLUE}] {summary['success_rate']}")
+            console.print()
+            
+            return {
+                "accounts": found_accounts,
+                "summary": summary,
+                "failed_sites": failed_sites
+            }
+        except Exception as e:
+            console.print(f"[{PRIMARY_BLUE}]Error during scan: {str(e)}[/{PRIMARY_BLUE}]")
+            return {
+                "error": str(e),
+                "accounts": [],
+                "summary": {"username": username, "total_checked": 0, "found": 0, "failed": 0}
+            }
 
     async def _scan_async(self, username: str) -> List[dict]:
         sem = asyncio.Semaphore(self.concurrency)
@@ -42,16 +90,56 @@ class UsernameScanner:
             tasks = []
             for site, cfg in self.sites.items():
                 tasks.append(self._probe_site(sem, session, site, cfg, username))
+            
             results = []
-            with Progress(SpinnerColumn(), *Progress.get_default_columns(), TimeElapsedColumn(), transient=True) as p:
-                task_id = p.add_task("Scanning social sites", total=len(tasks))
+            total_sites = len(tasks)
+            completed = 0
+            found = 0
+            
+            with Progress(
+                "{task.description}",
+                SpinnerColumn(),
+                "[",
+                TimeElapsedColumn(),
+                "] ",
+                "•",
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                console=console,
+                transient=False,
+                expand=True
+            ) as progress:
+                scan_task = progress.add_task(
+                    "starting...",
+                    total=total_sites
+                )
+                
                 for coro in asyncio.as_completed(tasks):
                     res = await coro
+                    completed += 1
+                    
                     if res:
-                        console.print(f"[green][FOUND][/green] {res['site']}: {res['url']}")
+                        if res.get("error"):
+                            # Skip displaying errors to maintain clean output
+                            pass
+                        else:
+                            found += 1
+                            console.print(Panel(
+                                f"[{SECONDARY_BLUE}]{res['site']}[/{SECONDARY_BLUE}]\n[{WHITE}]{res['url']}[/{WHITE}]",
+                                title="[white]Found Account[/white]",
+                                box=SQUARE,
+                                style=f"{WHITE}",
+                                padding=(0, 2)
+                            ))
                         results.append(res)
-                    p.advance(task_id)
-        return results
+                    
+                    # Update progress description
+                    progress.update(
+                        scan_task,
+                        advance=1,
+                        description=f"[{WHITE}]{found} accounts found[/{WHITE}]"
+                    )
+            
+            return results
 
     async def _probe_site(self, sem, session: aiohttp.ClientSession, site: str, cfg: dict, username: str):
         url = cfg.get("url", "").replace("{account}", username)
@@ -62,24 +150,45 @@ class UsernameScanner:
         if cfg.get("headers"):
             headers.update(cfg["headers"])  # allow site-specific headers
 
-        for attempt in range(self.retries + 1):
-            try:
-                async with sem:
-                    method = session.head if request_head_only else session.get
-                    async with method(url, proxy=self.proxy, headers=headers, allow_redirects=True) as resp:
-                        if await self._is_hit(resp, error_type, error_msg):
-                            return {"site": site, "url": str(resp.url), "status": "FOUND"}
-                        else:
+        try:
+            async with sem:
+                for attempt in range(self.retries + 1):
+                    try:
+                        method = session.head if request_head_only else session.get
+                        async with method(url, proxy=self.proxy, headers=headers, allow_redirects=True) as resp:
+                            if await self._is_hit(resp, error_type, error_msg):
+                                return {
+                                    "site": site,
+                                    "url": str(resp.url),
+                                    "status": "FOUND",
+                                    "status_code": resp.status
+                                }
                             return None
-            except asyncio.TimeoutError:
-                if attempt >= self.retries:
-                    return None
-            except aiohttp.ClientError:
-                if attempt >= self.retries:
-                    return None
-        return None
+                    except (asyncio.TimeoutError, aiohttp.ClientError):
+                        if attempt == self.retries:
+                            raise
+                        await asyncio.sleep(1)
+                return None
+        except asyncio.TimeoutError:
+            return {
+                "site": site,
+                "error": "Timeout",
+                "status": "ERROR"
+            }
+        except aiohttp.ClientError as e:
+            return {
+                "site": site,
+                "error": f"Connection error: {str(e)}",
+                "status": "ERROR"
+            }
+        except Exception as e:
+            return {
+                "site": site,
+                "error": f"Unexpected error: {str(e)}",
+                "status": "ERROR"
+            }
 
-    async def _is_hit(self, resp: ClientResponse, error_type: str, error_msg: str | None) -> bool:
+    async def _is_hit(self, resp: ClientResponse, error_type: str, error_msg: Optional[str]) -> bool:
         # Sherlock-style detection rules with enhancements
         status = resp.status
         text = None
